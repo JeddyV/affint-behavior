@@ -1,0 +1,175 @@
+---
+title: "Affective Intelligence Behavior"
+author: ""
+date: "2023-09-28"
+output:
+  html_document:
+    theme: united
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+  pdf_document:
+    toc: yes
+    toc_depth: '4'
+---
+
+```{r, include = FALSE}
+library(tidyverse)
+library(readxl)
+library(Hmisc)
+library(corrplot)
+library(car) #needed for vif() and durbinWatsonTest()
+library(lmtest) #needed for raintest() and bptest() 
+```
+
+# Preliminaries
+```{r, echo = FALSE}
+#Read in the data
+current_path <- getwd()
+path_to_data <- paste0(current_path, '/Behavioral_Data_FINAL_9.28.23.xlsx')
+twcf <- read_excel(path_to_data)
+
+#Exclusions
+twcf <- filter(twcf, twcf$Complete == 1)
+intel <- select(twcf, 
+                `Perceiving`, `Facilitating`, `Understanding`, `Maging`, `Emotiol Intelligence`,
+                `Verbal Comprehension`, `Perceptual Reasoning`, `Working Memory`, `Processing Speed`, `FSIQ`)
+
+#Correlations
+res2 <- rcorr(as.matrix(intel))
+corrpvalues <- p.adjust(res2$P, "bonferroni")
+dim(corrpvalues) <- c(10, 10)
+res2$P <- corrpvalues
+
+corrplot(res2$r, type = "upper", order = "hclust", p.mat = res2$p, sig.level = 0.01, insig = "blank", tl.cex = 0.7)
+
+#PERCEIVING
+#FACILITATING
+#UNDERSTANDING
+#MANAGING
+#Predicting IQ with the four MSCEIT subscales
+model1 <- lm(FSIQ ~ `Perceiving` + `Maging` + `Understanding` + `Facilitating`, data = twcf)
+summary(model1) #understanding predicts FSIQ (p < 0.001)
+
+#Predicting EQ with the four WAIS subscales
+model2 <- lm(`Emotiol Intelligence` ~ `Verbal Comprehension` + `Working Memory` + `Perceptual Reasoning` + `Processing Speed`, data = twcf)
+summary(model2)
+#Verbal Comprehension trending, p = 0.058
+
+#IRI
+model3 <- lm(`FSIQ` ~ `Empathic Concern` +	`Persol Distress` +	`Perspective Taking` + 	`Fantasizing`, data = twcf)
+summary(model3)
+#Null
+```
+
+# Model Diagnostics
+## Model 1
+```{r, echo = FALSE}
+#Linearity: Is it a straight line?
+plot(model1, 1)
+raintest(model1) #significant --> nonlinear 
+##Collinearity: How redundant are the variables? Rule of Thumb: > 5 bad :(
+vif(model1)
+
+#Homoscedasticity: Is it a straight line?
+plot(model1, 3)
+bptest(model1) #significant --> heteroscedastic
+
+#Normality: Is it a straight line?
+plot(model1, 2)
+shapiro.test(residuals(model1)) #significant --> abnormal
+
+#Independence
+durbinWatsonTest(model1) #significant --> not independent
+
+#Checking Outliers
+##Residuals vs. Leverage: visual check for outliers
+plot(model1, 5)
+##Cook's distance: Rule of Thumb: > (4/(n - k - 1)) is bad (Note: there are other criteria people follow, this is more conservative)
+threshold  <- 4/((nrow(twcf)-length(model1$coefficients)-1))
+plot(model1, 4)
+abline(h = threshold)
+```
+
+## Model 2
+```{r, echo = FALSE}
+#Linearity: Is it a straight line?
+plot(model2, 1)
+raintest(model2) #significant --> nonlinear 
+##Collinearity: How redundant are the variables? Rule of Thumb: > 5 bad :(
+vif(model2)
+
+#Homoscedasticity: Is it a straight line?
+plot(model2, 3)
+bptest(model2) #significant --> heteroscedastic
+
+#Normality: Is it a straight line?
+plot(model2, 2)
+shapiro.test(residuals(model2)) #significant --> abnormal
+#model violates normality so we need to add/drop more variables, remove outlier(s), 
+
+#Independence
+durbinWatsonTest(model2) #significant --> not independent
+
+#Checking Outliers
+##Residuals vs. Leverage: visual check for outliers
+plot(model2, 5)
+##Cook's distance: Rule of Thumb: > 4/(n - k - 1) is bad (Note: there are other criteria people follow)
+threshold  <- 4/((nrow(twcf)-length(model2$coefficients)-1))
+plot(model2, 4)
+abline(h = threshold)
+```
+
+```{r, echo = FALSE}
+#Exclude influential values
+cooks_exclude <- as.numeric(names(cooks.distance(model2))[(cooks.distance(model2) > 4/((nrow(twcf)-length(model2$coefficients)-1)))])
+model2.1 <- update(model2, data = twcf[-cooks_exclude, ])
+
+#Linearity: Is it a straight line?
+plot(model2.1, 1)
+raintest(model2.1) #significant --> nonlinear 
+##Collinearity: How redundant are the variables? Rule of Thumb: > 5 bad :(
+vif(model2.1)
+
+#Homoscedasticity: Is it a straight line?
+plot(model2.1, 3)
+bptest(model2.1) #significant --> heteroscedastic
+
+#Normality: Is it a straight line?
+plot(model2.1, 2)
+shapiro.test(residuals(model2.1)) #significant --> abnormal
+
+#Independence
+durbinWatsonTest(model2.1) #significant --> not independent
+```
+
+## Model 3
+```{r, echo = FALSE}
+#Linearity: Is it a straight line?
+plot(model3, 1)
+raintest(model3) #significant --> nonlinear 
+##Collinearity: How redundant are the variables? Rule of Thumb: > 5 bad :(
+vif(model3)
+
+#Homoscedasticity: Is it a straight line?
+plot(model3, 3)
+bptest(model3) #significant --> heteroscedastic
+
+#Normality: Is it a straight line?
+plot(model3, 2)
+shapiro.test(residuals(model3)) #significant --> abnormal
+
+#Independence
+durbinWatsonTest(model3) #significant --> not independent
+
+#Checking Outliers
+##Residuals vs. Leverage: visual check for outliers
+plot(model3, 5)
+##Cook's distance: Rule of Thumb: > 4/(n - k - 1) is bad (Note: there are other criteria people follow)
+threshold  <- 4/((nrow(twcf)-length(model3$coefficients)-1))
+plot(model3, 4)
+abline(h = threshold)
+
+#check the max value for model3
+cooks.distance(model3)[which.max(cooks.distance(model3))]
+```
