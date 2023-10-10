@@ -31,28 +31,71 @@ twcf <- read_excel(path_to_data)
 
 #Exclusions
 twcf <- filter(twcf, twcf$Complete == 1)
-intel <- select(twcf, 
+intel <- select(twcf, `Subject ID`,
                 `Perceiving`, `Facilitating`, `Understanding`, `Maging`, `Emotiol Intelligence`,
                 `Verbal Comprehension`, `Perceptual Reasoning`, `Working Memory`, `Processing Speed`, `FSIQ`)
 
 #Correlations
-res2 <- rcorr(as.matrix(intel))
+res2 <- rcorr(as.matrix(intel[-1]))
 corrpvalues <- p.adjust(res2$P, "bonferroni")
 dim(corrpvalues) <- c(10, 10)
 res2$P <- corrpvalues
 
 corrplot(res2$r, type = "upper", order = "hclust", p.mat = res2$p, sig.level = 0.01, insig = "blank", tl.cex = 0.7)
+```
 
+## Data Transformations 
+Everything in the MSCEIT is left-skewed. Only "Verbal Comprehension" from WAIS is left-skewed. After transforming the data, there is still skewness for MSCEIT's "Perceiving" subscale and WAIS' "Verbal Comprehension"
+
+```{r, include = FALSE}
+#MSCEIT
+hist.data.frame(intel[2:6], nclass = "compute") #everything is left-skewed
+shapiro.test(intel$`Perceiving`) 
+shapiro.test(intel$`Facilitating`)
+shapiro.test(intel$`Understanding`)
+shapiro.test(intel$`Maging`)
+shapiro.test(intel$`Emotiol Intelligence`)
+
+#WAIS
+hist.data.frame(intel[7:10], nclass = "compute")
+shapiro.test(intel$`Verbal Comprehension`) #<- only one not normal
+shapiro.test(intel$`Perceptual Reasoning`)
+shapiro.test(intel$`Working Memory`)
+shapiro.test(intel$`Processing Speed`)
+
+#MSCEIT Transformations
+intel <- intel %>%
+  mutate(perceiving_2 = `Perceiving`^2, 
+         facilitate_2 = `Facilitating`^2, 
+         understand_2 = `Understanding`^2, 
+         maging_2 = `Maging`^2, 
+         eq_2 = `Emotiol Intelligence`^2,
+         vc_2 = `Verbal Comprehension`^2)
+#Post Transformations
+hist.data.frame(intel[12:17], nclass = "compute") #everything is left-skewed
+shapiro.test(intel$perceiving_2) #still left-skewed
+shapiro.test(intel$facilitate_2)
+shapiro.test(intel$understand_2)
+shapiro.test(intel$maging_2)
+shapiro.test(intel$eq_2)
+shapiro.test(intel$vc_2) #still left-skewed
+```
+
+# Linear Models
+```{r, echo = FALSE}
 #PERCEIVING
 #FACILITATING
 #UNDERSTANDING
 #MANAGING
 #Predicting IQ with the four MSCEIT subscales
-model1 <- lm(FSIQ ~ `Perceiving` + `Maging` + `Understanding` + `Facilitating`, data = twcf)
-summary(model1) #understanding predicts FSIQ (p < 0.001)
+# model1 <- lm(FSIQ ~ `Perceiving` + `Maging` + `Understanding` + `Facilitating`, data = twcf)
+# summary(model1) #understanding predicts FSIQ (p < 0.001)
+
+model1 <- lm(FSIQ ~ perceiving_2 + maging_2 + understand_2 + facilitate_2, intel)
+summary(model1)
 
 #Predicting EQ with the four WAIS subscales
-model2 <- lm(`Emotiol Intelligence` ~ `Verbal Comprehension` + `Working Memory` + `Perceptual Reasoning` + `Processing Speed`, data = twcf)
+model2 <- lm(`Emotiol Intelligence` ~ vc_2 + `Working Memory` + `Perceptual Reasoning` + `Processing Speed`, data = intel)
 summary(model2)
 #Verbal Comprehension trending, p = 0.058
 
@@ -86,7 +129,7 @@ durbinWatsonTest(model1) #significant --> not independent
 ##Residuals vs. Leverage: visual check for outliers
 plot(model1, 5)
 ##Cook's distance: Rule of Thumb: > (4/(n - k - 1)) is bad (Note: there are other criteria people follow, this is more conservative)
-threshold  <- 4/((nrow(twcf)-length(model1$coefficients)-1))
+threshold <- 4/((nrow(twcf)-length(model1$coefficients)-1))
 plot(model1, 4)
 abline(h = threshold)
 ```
@@ -115,15 +158,27 @@ durbinWatsonTest(model2) #significant --> not independent
 ##Residuals vs. Leverage: visual check for outliers
 plot(model2, 5)
 ##Cook's distance: Rule of Thumb: > 4/(n - k - 1) is bad (Note: there are other criteria people follow)
-threshold  <- 4/((nrow(twcf)-length(model2$coefficients)-1))
+threshold <- 4/((nrow(twcf)-length(model2$coefficients)-1))
 plot(model2, 4)
 abline(h = threshold)
 ```
 
+### Model 2.1
+This model removes individuals whose cook's distance exceed a threshold of 4/(n-k-1). This was done to address a violation of normality.
+
 ```{r, echo = FALSE}
-#Exclude influential values
-cooks_exclude <- as.numeric(names(cooks.distance(model2))[(cooks.distance(model2) > 4/((nrow(twcf)-length(model2$coefficients)-1)))])
-model2.1 <- update(model2, data = twcf[-cooks_exclude, ])
+#calculate cooks distance values
+cooks_distance <- cooks.distance(model2)
+
+#identify the participants we'd like to exclude for Cook's Distance
+#"AI53"  "AI56"  "AI97"  "AI100" "AI106"
+influential_cooks <- data.frame(
+  `Subject ID` = intel$`Subject ID`[which(cooks_distance > threshold)],
+  cooks_distance = cooks_distance[which(cooks_distance > threshold)]
+)
+
+#Update the model removing these individuals
+model2.1 <- update(model2, data = intel[!(intel$`Subject ID` %in% influential_cooks$Subject.ID), ])
 
 #Linearity: Is it a straight line?
 plot(model2.1, 1)
@@ -141,6 +196,9 @@ shapiro.test(residuals(model2.1)) #significant --> abnormal
 
 #Independence
 durbinWatsonTest(model2.1) #significant --> not independent
+
+#examine summary output
+summary(model2.1)
 ```
 
 ## Model 3
@@ -166,7 +224,7 @@ durbinWatsonTest(model3) #significant --> not independent
 ##Residuals vs. Leverage: visual check for outliers
 plot(model3, 5)
 ##Cook's distance: Rule of Thumb: > 4/(n - k - 1) is bad (Note: there are other criteria people follow)
-threshold  <- 4/((nrow(twcf)-length(model3$coefficients)-1))
+threshold <- 4/((nrow(twcf)-length(model3$coefficients)-1))
 plot(model3, 4)
 abline(h = threshold)
 
